@@ -10,23 +10,31 @@
 //! Reputation token: a Token-2022 mint with the NonTransferable extension.
 //! Mint authority is a program-derived PDA (`[b"mint_authority"]`), so only
 //! this program can issue REP. The mint is created during `initialize_oracle`
-//! using Anchor's declarative `extensions::non_transferable` constraint.
-//! If your anchor-spl version doesn't expose that, fall back to a manual CPI
-//! into `spl_token_2022::extension::non_transferable::initialize` — see
-//! https://docs.rs/spl-token-2022 .
+//! via raw CPIs in the instruction body. anchor-spl 0.32 has NonTransferable
+//! support in codegen but its parser does NOT accept
+//! `extensions::non_transferable` (verified in
+//! `anchor-syn-0.32.1/src/parser/accounts/constraints.rs`), so we
+//! (1) `system_program::create_account` with extension-aware size,
+//! (2) `non_transferable_mint_initialize`, then
+//! (3) `initialize_mint2`. Order matters — extensions must be initialized
+//! before the base mint.
 //!
 //! After your first `anchor build`, run `anchor keys sync` — that rewrites
 //! `declare_id!` below AND the placeholders in Anchor.toml with the real
 //! program pubkey.
 
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{create_account, CreateAccount};
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token_2022::Token2022,
-    token_interface::{mint_to, Mint, MintTo, TokenAccount},
+    token_2022::{initialize_mint2, spl_token_2022, InitializeMint2, Token2022},
+    token_interface::{
+        mint_to, non_transferable_mint_initialize, Mint, MintTo,
+        NonTransferableMintInitialize, TokenAccount,
+    },
 };
 
-declare_id!("11111111111111111111111111111111");
+declare_id!("EvgHfdx5xyTNoPnaHwDtySdAtMUYGcMz9nwCiwMLi9sn");
 
 // --- Sizing constants. Loosen carefully; bigger accounts = more rent. ---
 pub const MAX_PROJECT_ID: usize = 64;
@@ -47,6 +55,54 @@ pub mod indie_pool {
         ctx: Context<InitializeOracle>,
         oracle_pubkey: Pubkey,
     ) -> Result<()> {
+        // --- Manually create + init the Token-2022 REP mint with NonTransferable. ---
+        // anchor-spl 0.32's declarative `extensions::non_transferable` doesn't
+        // parse, so we drive create_account → non_transferable_mint_initialize
+        // → initialize_mint2 ourselves. Order is enforced by Token-2022:
+        // extensions must be initialized BEFORE the base mint.
+        let space = spl_token_2022::extension::ExtensionType::try_calculate_account_len::<
+            spl_token_2022::state::Mint,
+        >(&[spl_token_2022::extension::ExtensionType::NonTransferable])?;
+        let lamports = Rent::get()?.minimum_balance(space);
+
+        let rep_mint_bump = ctx.bumps.rep_mint;
+        let rep_mint_seeds: &[&[&[u8]]] = &[&[b"rep_mint", &[rep_mint_bump]]];
+
+        create_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                CreateAccount {
+                    from: ctx.accounts.admin.to_account_info(),
+                    to: ctx.accounts.rep_mint.to_account_info(),
+                },
+                rep_mint_seeds,
+            ),
+            lamports,
+            space as u64,
+            &ctx.accounts.token_program.key(),
+        )?;
+
+        non_transferable_mint_initialize(CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            NonTransferableMintInitialize {
+                token_program_id: ctx.accounts.token_program.to_account_info(),
+                mint: ctx.accounts.rep_mint.to_account_info(),
+            },
+        ))?;
+
+        initialize_mint2(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                InitializeMint2 {
+                    mint: ctx.accounts.rep_mint.to_account_info(),
+                },
+            ),
+            0,                                    // decimals
+            &ctx.accounts.mint_authority.key(),   // mint authority = PDA
+            None,                                 // no freeze authority
+        )?;
+
+        // --- Now record the oracle state. ---
         let state = &mut ctx.accounts.oracle_state;
         state.admin = ctx.accounts.admin.key();
         state.oracle = oracle_pubkey;
@@ -134,35 +190,41 @@ pub mod indie_pool {
     /// or by the oracle service). Mints `score` REP into the contributor's
     /// associated token account on the NonTransferable mint.
     pub fn mint_reputation(ctx: Context<MintReputation>) -> Result<()> {
-        let c = &ctx.accounts.contribution;
-        require!(
-            matches!(c.status, ContributionStatus::Verified),
-            IndiePoolError::NotVerified
-        );
-        require!(!c.minted, IndiePoolError::AlreadyMinted);
+        // 1) Validate + snapshot. Scoped block ends the immutable borrow
+        //    so we can reborrow `contribution` mutably below.
+        let (score, contributor, contribution_key) = {
+            let c = &ctx.accounts.contribution;
+            require!(
+                matches!(c.status, ContributionStatus::Verified),
+                IndiePoolError::NotVerified
+            );
+            require!(!c.minted, IndiePoolError::AlreadyMinted);
+            (c.score, c.contributor, c.key())
+        };
 
+        // 2) CPI: mint `score` REP via the PDA mint authority.
         let bump = ctx.accounts.oracle_state.mint_authority_bump;
         let signer_seeds: &[&[&[u8]]] = &[&[b"mint_authority", &[bump]]];
+        mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.rep_mint.to_account_info(),
+                    to: ctx.accounts.contributor_token_account.to_account_info(),
+                    authority: ctx.accounts.mint_authority.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            score as u64,
+        )?;
 
-        let cpi_accounts = MintTo {
-            mint: ctx.accounts.rep_mint.to_account_info(),
-            to: ctx.accounts.contributor_token_account.to_account_info(),
-            authority: ctx.accounts.mint_authority.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-            signer_seeds,
-        );
-        mint_to(cpi_ctx, c.score as u64)?;
-
-        let c_mut = &mut ctx.accounts.contribution;
-        c_mut.minted = true;
+        // 3) Persist `minted = true` so this contribution can't be re-minted.
+        ctx.accounts.contribution.minted = true;
 
         emit!(ReputationMinted {
-            contribution: c_mut.key(),
-            contributor: c_mut.contributor,
-            amount: c.score as u64,
+            contribution: contribution_key,
+            contributor,
+            amount: score as u64,
         });
         Ok(())
     }
@@ -186,19 +248,18 @@ pub struct InitializeOracle<'info> {
     )]
     pub oracle_state: Account<'info, OracleState>,
 
-    /// REP mint, Token-2022 with NonTransferable extension.
-    /// Decimals = 0 so balances read as whole-number reputation points.
+    /// CHECK: REP mint PDA. Initialized in the instruction body as a
+    /// Token-2022 mint with the NonTransferable extension and decimals = 0
+    /// (whole-number reputation points). Anchor's declarative `init` can't
+    /// express NonTransferable in 0.32 (parser limitation), so we create
+    /// the account + init extension + init mint manually. Other instructions
+    /// re-bind this PDA as `InterfaceAccount<'info, Mint>` for type safety.
     #[account(
-        init,
-        payer = admin,
+        mut,
         seeds = [b"rep_mint"],
         bump,
-        mint::token_program = token_program,
-        mint::decimals = 0,
-        mint::authority = mint_authority,
-        extensions::non_transferable,
     )]
-    pub rep_mint: InterfaceAccount<'info, Mint>,
+    pub rep_mint: UncheckedAccount<'info>,
 
     /// CHECK: PDA used as the mint authority for `rep_mint`.
     #[account(

@@ -5,17 +5,17 @@ anchor_version = "0.32.1"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-indie_pool = "11111111111111111111111111111111"
-
 [programs.devnet]
+indie_pool = "EvgHfdx5xyTNoPnaHwDtySdAtMUYGcMz9nwCiwMLi9sn"
+
+[programs.localnet]
 indie_pool = "11111111111111111111111111111111"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
@@ -27,9 +27,7 @@ shutdown_wait = 2000
 upgradeable = false
 
 [test.validator]
+bind_address = "0.0.0.0"
 url = "https://api.devnet.solana.com"
-
-# After your first `anchor build`, run:
-#   anchor keys sync
-# That replaces the 11111... placeholders above AND in declare_id! with the
-# real program pubkey (target/deploy/indie_pool-keypair.json).
+ledger = ".anchor/test-ledger"
+rpc_port = 8899
