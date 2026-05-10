@@ -8,6 +8,8 @@
   --color-rep-card-2: #20203a;
   --color-rep-cyan: #00e5ff;
   --color-rep-purple: #7c3aed;
+  --color-rep-pink: #ec4899;
+  --color-rep-amber: #f59e0b;
   --color-rep-fg: #ededed;
   --color-rep-muted: #6b7280;
   --color-rep-danger: #ff3366;
@@ -73,8 +75,26 @@ body {
   animation: rep-bar-fill 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Slide-over panel — enters from the right edge.
+ * Used by SubmitSlideover on /projects. */
+@keyframes rep-slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.rep-slide-in {
+  animation: rep-slide-in-right 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes rep-fade-in-overlay {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.rep-overlay-in {
+  animation: rep-fade-in-overlay 0.2s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rep-glitch, .rep-fade-in, .rep-pulse, .rep-bar-fill { animation: none; }
+  .rep-glitch, .rep-fade-in, .rep-pulse, .rep-bar-fill,
+  .rep-slide-in, .rep-overlay-in { animation: none; }
 }
 
 /* Wallet-adapter modal: tame the default styles to match. */
