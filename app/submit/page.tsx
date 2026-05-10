@@ -5,7 +5,25 @@ import Link from "next/link";
 import { Nav } from "@/components/nav";
 import { WalletGate } from "@/components/wallet-gate";
 import { ScoreRing } from "@/components/score-ring";
+import { RotatingText } from "@/components/rotating-text";
 import { useWalletPubkey } from "@/lib/use-wallet-pubkey";
+
+const SUBMITTING_PHRASES = [
+  "Awaiting wallet signature…",
+  "Building submit_contribution instruction…",
+  "Broadcasting to devnet validators…",
+  "Waiting for confirmation…",
+];
+
+const SCORING_PHRASES = [
+  "Confirming transaction on devnet…",
+  "Reading contribution metadata…",
+  "Cross-referencing project context…",
+  "Evaluating originality and completeness…",
+  "Weighing technical quality…",
+  "Computing reputation impact…",
+  "Almost there…",
+];
 import {
   CONTRIBUTION_TYPES,
   type Contribution,
@@ -84,50 +102,54 @@ function SubmitFlow() {
       <div className="max-w-2xl mx-auto">
         <Header stage={stage} />
 
-        {stage.kind === "form" && (
-          <Form
-            projectId={projectId}
-            setProjectId={setProjectId}
-            contributionType={contributionType}
-            setContributionType={setContributionType}
-            ipfsHash={ipfsHash}
-            setIpfsHash={setIpfsHash}
-            description={description}
-            setDescription={setDescription}
-            onSubmit={handleSubmit}
-          />
-        )}
+        {/* `key` re-mounts on stage change; rep-fade-in animates each
+         * stage in. Keeps the demo feeling like a single fluid story. */}
+        <div key={stage.kind} className="rep-fade-in">
+          {stage.kind === "form" && (
+            <Form
+              projectId={projectId}
+              setProjectId={setProjectId}
+              contributionType={contributionType}
+              setContributionType={setContributionType}
+              ipfsHash={ipfsHash}
+              setIpfsHash={setIpfsHash}
+              description={description}
+              setDescription={setDescription}
+              onSubmit={handleSubmit}
+            />
+          )}
 
-        {stage.kind === "submitting" && (
-          <PendingPanel
-            heading="Signing transaction"
-            sub="Approve in your wallet — this opens the contribution PDA on devnet."
-          />
-        )}
+          {stage.kind === "submitting" && (
+            <PendingPanel
+              heading="Signing transaction"
+              cycle={SUBMITTING_PHRASES}
+            />
+          )}
 
-        {stage.kind === "pending" && (
-          <PendingPanel
-            heading="AI scorer is evaluating"
-            sub="Claude is reading your submission and assigning a 0-100 reputation score."
-            contribution={stage.contribution}
-            signature={stage.signature}
-          />
-        )}
+          {stage.kind === "pending" && (
+            <PendingPanel
+              heading="AI scorer is evaluating"
+              cycle={SCORING_PHRASES}
+              contribution={stage.contribution}
+              signature={stage.signature}
+            />
+          )}
 
-        {stage.kind === "done" && (
-          <ResultPanel
-            contribution={stage.contribution}
-            result={stage.result}
-            onReset={() => setStage({ kind: "form" })}
-          />
-        )}
+          {stage.kind === "done" && (
+            <ResultPanel
+              contribution={stage.contribution}
+              result={stage.result}
+              onReset={() => setStage({ kind: "form" })}
+            />
+          )}
 
-        {stage.kind === "error" && (
-          <ErrorPanel
-            message={stage.message}
-            onReset={() => setStage({ kind: "form" })}
-          />
-        )}
+          {stage.kind === "error" && (
+            <ErrorPanel
+              message={stage.message}
+              onReset={() => setStage({ kind: "form" })}
+            />
+          )}
+        </div>
       </div>
     </section>
   );
@@ -283,33 +305,48 @@ function Field({
 
 function PendingPanel({
   heading,
-  sub,
+  cycle,
   contribution,
   signature,
 }: {
   heading: string;
-  sub: string;
+  cycle: string[];
   contribution?: Contribution;
   signature?: string;
 }) {
   return (
-    <div className="text-center space-y-8 py-12 px-6 rounded-2xl border border-rep-purple/20 bg-rep-card/40">
-      <div className="flex justify-center">
+    <div className="text-center space-y-8 py-12 px-6 rounded-2xl border border-rep-purple/20 bg-rep-card/40 relative overflow-hidden">
+      {/* Subtle scanning gradient — suggests "the AI is reading right now" */}
+      <div className="absolute inset-0 pointer-events-none opacity-30">
+        <div
+          className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-rep-cyan to-transparent"
+          style={{
+            animation: "rep-bar-fill 2.4s ease-in-out infinite",
+            top: "0%",
+          }}
+        />
+      </div>
+
+      <div className="flex justify-center relative">
         <Spinner />
       </div>
-      <div>
+      <div className="relative">
         <p className="rep-glitch font-mono text-xs uppercase tracking-[0.3em] text-rep-cyan mb-3">
           {heading.toLowerCase()}
         </p>
         <h2 className="text-2xl font-semibold tracking-tight">{heading}</h2>
-        <p className="text-rep-muted text-sm mt-2 max-w-md mx-auto leading-relaxed">
-          {sub}
+        <p className="text-rep-muted text-sm mt-3 max-w-md mx-auto leading-relaxed min-h-[1.5em]">
+          <RotatingText phrases={cycle} intervalMs={850} />
         </p>
       </div>
       {contribution && (
-        <div className="font-mono text-xs space-y-1 max-w-sm mx-auto pt-4 border-t border-white/5">
+        <div className="font-mono text-xs space-y-1 max-w-sm mx-auto pt-4 border-t border-white/5 relative">
           <Row k="contribution PDA" v={contribution.pubkey} />
           {signature && <Row k="signature" v={signature} />}
+          <div className="flex items-center justify-center gap-2 pt-3 text-[10px] uppercase tracking-[0.2em] text-rep-success">
+            <span className="size-1.5 rounded-full bg-rep-success rep-pulse" />
+            <span>devnet · oracle online</span>
+          </div>
         </div>
       )}
     </div>

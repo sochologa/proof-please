@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Nav } from "@/components/nav";
+import { GlitchText } from "@/components/glitch-text";
 
 export default function Home() {
   return (
@@ -13,9 +14,11 @@ export default function Home() {
             decentralized contribution & reputation
           </p>
           <h1 className="text-5xl sm:text-6xl font-semibold tracking-tight leading-[1.05]">
-            Tokenize creative work.
+            <GlitchText text="Tokenize creative work." durationMs={650} />
             <br />
-            <span className="text-rep-purple">Not just money.</span>
+            <span className="text-rep-purple">
+              <GlitchText text="Not just money." durationMs={850} />
+            </span>
           </h1>
           <p className="text-lg text-rep-muted max-w-xl mx-auto leading-relaxed">
             Submit code, art, music, or 3D contributions. An AI scorer reads

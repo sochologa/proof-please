@@ -267,7 +267,7 @@ function MilestoneRow({ m }: { m: Milestone }) {
       </div>
       <div className="mt-3 h-1 rounded-full bg-white/5 overflow-hidden">
         <div
-          className={`h-full ${barColor} transition-[width] duration-700`}
+          className={`h-full ${barColor} rep-bar-fill ${m.status === "in_progress" ? "rep-pulse" : ""}`}
           style={{ width: `${Math.round(m.progress * 100)}%` }}
         />
       </div>
